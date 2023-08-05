@@ -213,38 +213,91 @@ events =
   |> IO.inspect(charlists: :as_lists, limit: :infinity)
 ```
 
-```elixir
-# Total number of events
-events |> Enum.flat_map(fn {_etype, counts} -> counts end) |> Enum.sum()
-```
+## ChatGpt Refactor of above pipeline
 
 ```elixir
-# Total size of all files in Jan 2015
-size_in_bytes =
-  "ls -l /Users/parth/temp/github_events/2015/"
-  |> to_charlist()
-  |> :os.cmd()
-  |> to_string()
-  |> String.split("\n")
-  |> Enum.reject(fn line -> String.starts_with?(line, "total") end)
-  |> Enum.map(fn line -> String.split(line, ~r/\s+/) end)
-  |> Enum.map(fn row -> Enum.at(row, 4) end)
-  |> Enum.reject(&is_nil(&1))
-  |> Enum.map(&String.to_integer(&1))
-  |> Enum.sum()
+defmodule StreamProcessor do
+  def process_streams(streams) do
+    streams
+    |> take_hours()
+    |> chunk_and_flatten()
+    |> group_by_event_type()
+    |> sort_events()
+    |> transform_counts()
+  end
 
-size_in_gb = (size_in_bytes / :math.pow(10, 9)) |> Float.round(2)
+  defp take_hours(streams, num_hours \\ 5) do
+    Enum.take(streams, num_hours)
+  end
 
-"#{size_in_gb} GB"
+  defp chunk_and_flatten(streams) do
+    streams
+    |> Enum.chunk_every(10)
+    |> Enum.flat_map(&process_chunk/1)
+  end
+
+  defp process_chunk(chunk) do
+    chunk
+    |> Flow.from_enumerables()
+    |> Flow.map(&extract_event/1)
+    |> Flow.partition()
+    |> Flow.reduce(fn -> %{} end, &accumulate_events/2)
+  end
+
+  defp extract_event(line) do
+    mp = Jason.decode!(line)
+    [date, time] = mp["created_at"] |> String.split("T")
+    event_type = mp["type"]
+    hour = String.split(time, ":") |> hd
+    {hour, event_type}
+  end
+
+  defp accumulate_events({hour, event_type}, acc) do
+    key = "#{hour}:#{event_type}"
+    Map.update(acc, key, 1, &(&1 + 1))
+  end
+
+  defp group_by_event_type(events) do
+    Enum.group_by(events, &get_event_type/1)
+  end
+
+  defp get_event_type({key, _count}) do
+    String.split(key, ":") |> Enum.at(1)
+  end
+
+  defp sort_events(events) do
+    Enum.map(events, &sort_by_hour/1)
+  end
+
+  defp sort_by_hour({event_type, arr}) do
+    sorted = Enum.sort_by(arr, &get_hour_from_key/1)
+    {event_type, sorted}
+  end
+
+  defp get_hour_from_key({key, _count}) do
+    key |> String.split(":") |> hd
+  end
+
+  defp transform_counts(events) do
+    Enum.map(events, &extract_counts/1)
+  end
+
+  defp extract_counts({event_type, arr}) do
+    counts = arr |> Enum.map(fn {_, count} -> "#{count}" end)
+    {event_type, counts}
+  end
+end
+
+StreamProcessor.process_streams(streams)
 ```
 
 ```elixir
 event_types =
-  events
+  sorted_events
   |> Enum.map(fn {event_type, _} -> event_type end)
 
-categories = 0..23 |> Enum.to_list()
-# stack_data = sorted_events |> Enum.into(%{})
+categories = hours
+stack_data = sorted_events |> Enum.into(%{})
 
 stacked_bar_options = %{
   title: "My Stacked Bar Chart",
@@ -252,7 +305,7 @@ stacked_bar_options = %{
   categories: categories,
   # Change to "vertical" for vertical orientation
   orientation: "horizontal",
-  stacked_data: events
+  stacked_data: stack_data
 }
 
 LbEcharts.stacked_bar(stacked_bar_options)
