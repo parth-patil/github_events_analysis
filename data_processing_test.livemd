@@ -14,6 +14,17 @@ Mix.install([
 
 ## Section
 
+## Helper Functions
+
+```elixir
+exec_cmd = fn cmd ->
+  cmd
+  |> to_charlist()
+  |> :os.cmd()
+  |> to_string()
+end
+```
+
 ## Create TSV files from the input json files
 
 ```elixir
@@ -471,14 +482,68 @@ Mix.install([
 #### Optimize using explorer
 
 ```elixir
-alias Explorer.DataFrame, as: DF
+# alias Explorer.DataFrame, as: DF
 
-file_name = "/Users/parth/temp/github_events/clickhouse_tsv/github_events_ab"
-df = DF.from_csv!(file_name, delimiter: "\t", header: false)
+# file_name = "/Users/parth/temp/github_events/clickhouse_tsv/github_events_ab"
+# df = DF.from_csv!(file_name, delimiter: "\t", header: false)
 ```
 
 ```elixir
-alias Explorer.Series
+# alias Explorer.Series
 
-DF.frequencies(df, ["column_13"])
+# DF.frequencies(df, ["column_13"])
+```
+
+## Pre-filtering using ClickHouse
+
+When you have a huge amount of data it might be better to load it in clickhouse first and then prefilter things at clickhouse level before handling it in Elixir
+
+```elixir
+# Dump the data from clickhouse to local in multiple files
+
+# Find the total number of lines
+
+# Split by number of cores
+defmodule ClickHousePrefiltering do
+  @clickhouse_client "~/tools/ch_may_23/clickhouse client"
+
+  def exec_cmd(cmd) do
+    cmd
+    |> to_charlist()
+    |> :os.cmd()
+    |> to_string()
+  end
+
+  def exec_ch_query(query) do
+    cmd = """
+    #{@clickhouse_client} --query "#{query}"
+    """
+
+    exec_cmd(cmd)
+  end
+
+  def dump_from_clickhouse(query, out_dir, num_files, file_prefix) do
+    cmd = """
+
+    """
+
+    exec_cmd(cmd)
+  end
+
+  def find_num_rows_for_sunday() do
+    query = "select count(*) from github_events where toDayOfWeek(created_at) = 7"
+    exec_ch_query(query)
+  end
+
+  def run() do
+    num_rows = find_num_rows_for_sunday()
+    num_schedulers = :erlang.system_info(:schedulers)
+
+    query = """
+    select event_type, toDayOfWeek(created_at), toHour(created_at)
+    from github_events
+    format TabSeparated
+    """
+  end
+end
 ```
