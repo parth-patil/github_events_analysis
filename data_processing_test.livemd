@@ -6,7 +6,9 @@ Mix.install([
   {:jason_native, "~> 0.1.0"},
   {:flow, "~> 1.2"},
   {:jiffy, "~> 1.1"},
-  {:lb_echarts, "~> 0.0.3"}
+  {:lb_echarts, "~> 0.0.3"},
+  {:explorer, "~> 0.6.1"},
+  {:kino_explorer, "~> 0.1.8"}
 ])
 ```
 
@@ -15,31 +17,31 @@ Mix.install([
 ## Create TSV files from the input json files
 
 ```elixir
-get_files_in_range = fn file_dir, start_date, end_date ->
-  dates =
-    Date.range(start_date, end_date)
-    |> Enum.map(&Date.to_string(&1))
+# get_files_in_range = fn file_dir, start_date, end_date ->
+#   dates =
+#     Date.range(start_date, end_date)
+#     |> Enum.map(&Date.to_string(&1))
 
-  for date <- dates,
-      hour <- 0..23 do
-    "#{file_dir}/#{date}-#{hour}.json.gz"
-  end
-  |> Enum.filter(&File.exists?(&1))
-end
+#   for date <- dates,
+#       hour <- 0..23 do
+#     "#{file_dir}/#{date}-#{hour}.json.gz"
+#   end
+#   |> Enum.filter(&File.exists?(&1))
+# end
 
-input_dir = "/Users/parth/temp/github_events/2015"
-output_dir = "/Users/parth/temp/github_events/2015/tsv"
-start_date = ~D[2015-01-01]
-end_date = ~D[2015-01-31]
+# input_dir = "/Users/parth/temp/github_events/2015"
+# output_dir = "/Users/parth/temp/github_events/2015/tsv"
+# start_date = ~D[2015-01-01]
+# end_date = ~D[2015-01-31]
 
-get_files_in_range.(input_dir, start_date, end_date)
-|> Flow.from_enumerable()
-|> Flow.partition()
-|> Flow.map(fn file ->
-  "File #{file}"
-  stream = File.stream!(file, [:compressed, {:read_ahead, 100_000}])
-end)
-|> Enum.to_list()
+# get_files_in_range.(input_dir, start_date, end_date)
+# |> Flow.from_enumerable()
+# |> Flow.partition()
+# |> Flow.map(fn file ->
+#   "File #{file}"
+#   stream = File.stream!(file, [:compressed, {:read_ahead, 100_000}])
+# end)
+# |> Enum.to_list()
 ```
 
 ```elixir
@@ -75,10 +77,10 @@ end)
 #     mp["type"]
 #   end)
 #   |> Flow.partition()
-#   |> Flow.reduce(fn -> :ets.new(:event_types, []) end, fn event_type, ets ->
-#     :ets.update_counter(ets, event_type, {2, 1}, {event_type, 0})
-#     ets
-#   end)
+#   |> 
+# |> Flow.reduce(fn -> %{} end, fn event_type, acc ->
+#       Map.update(acc, event_type, 1, &(&1 + 1))
+#     end)
 #   |> Flow.on_trigger(fn ets ->
 #     :ets.give_away(ets, parent, [])
 #     # Emit the ETS
@@ -143,119 +145,119 @@ end)
 ## Timeseries of events per hour
 
 ```elixir
-# Define Helper functioons
-get_files_in_range = fn file_dir, start_date, end_date ->
-  dates =
-    Date.range(start_date, end_date)
-    |> Enum.map(&Date.to_string(&1))
+# # Define Helper functioons
+# get_files_in_range = fn file_dir, start_date, end_date ->
+#   dates =
+#     Date.range(start_date, end_date)
+#     |> Enum.map(&Date.to_string(&1))
 
-  for date <- dates,
-      hour <- 0..23 do
-    "#{file_dir}/#{date}-#{hour}.json.gz"
-  end
-  |> Enum.filter(&File.exists?(&1))
-end
+#   for date <- dates,
+#       hour <- 0..23 do
+#     "#{file_dir}/#{date}-#{hour}.json.gz"
+#   end
+#   |> Enum.filter(&File.exists?(&1))
+# end
 
-get_streams_for_files = fn files ->
-  files
-  |> Enum.map(fn full_path ->
-    File.stream!(full_path, [:compressed, {:read_ahead, 100_000}])
-  end)
-end
+# get_streams_for_files = fn files ->
+#   files
+#   |> Enum.map(fn full_path ->
+#     File.stream!(full_path, [:compressed, {:read_ahead, 100_000}])
+#   end)
+# end
 
-extract_event_type_and_hour = fn json ->
-  mp = Jason.decode!(json)
-  [date, time] = mp["created_at"] |> String.split("T")
-  event_type = mp["type"]
-  hour = String.split(time, ":") |> hd |> String.to_integer()
-  {event_type, hour}
-end
+# extract_event_type_and_hour = fn json ->
+#   mp = Jason.decode!(json)
+#   [date, time] = mp["created_at"] |> String.split("T")
+#   event_type = mp["type"]
+#   hour = String.split(time, ":") |> hd |> String.to_integer()
+#   {event_type, hour}
+# end
 
-# Initialize required data
-file_dir = "/Users/parth/temp/github_events/2015"
-start_date = ~D[2015-01-01]
-end_date = ~D[2015-01-31]
+# # Initialize required data
+# file_dir = "/Users/parth/temp/github_events/2015"
+# start_date = ~D[2015-01-01]
+# end_date = ~D[2015-01-31]
 
-streams =
-  get_files_in_range.(file_dir, start_date, end_date)
-  |> get_streams_for_files.()
+# streams =
+#   get_files_in_range.(file_dir, start_date, end_date)
+#   |> get_streams_for_files.()
 
-# Begin Pipeline
-events =
-  streams
-  |> Enum.chunk_every(10)
-  |> Enum.flat_map(fn chunk ->
-    chunk
-    |> Flow.from_enumerables()
-    |> Flow.map(fn line ->
-      extract_event_type_and_hour.(line)
-    end)
-    |> Flow.partition()
-    |> Flow.reduce(fn -> %{} end, fn {event_type, hour}, acc ->
-      key = {event_type, hour}
-      Map.update(acc, key, 1, &(&1 + 1))
-    end)
-  end)
-  |> Enum.to_list()
-  |> Enum.group_by(fn {{etype, _hour}, _count} -> etype end)
-  |> Enum.map(fn {etype, bag} ->
-    counter_lookup = bag |> Enum.into(%{})
+# # Begin Pipeline
+# events =
+#   streams
+#   |> Enum.chunk_every(10)
+#   |> Enum.flat_map(fn chunk ->
+#     chunk
+#     |> Flow.from_enumerables()
+#     |> Flow.map(fn line ->
+#       extract_event_type_and_hour.(line)
+#     end)
+#     |> Flow.partition()
+#     |> Flow.reduce(fn -> %{} end, fn {event_type, hour}, acc ->
+#       key = {event_type, hour}
+#       Map.update(acc, key, 1, &(&1 + 1))
+#     end)
+#   end)
+#   |> Enum.to_list()
+#   |> Enum.group_by(fn {{etype, _hour}, _count} -> etype end)
+#   |> Enum.map(fn {etype, bag} ->
+#     counter_lookup = bag |> Enum.into(%{})
 
-    hour_counts =
-      Enum.map(0..23, fn hour ->
-        key = {etype, hour}
-        Map.get(counter_lookup, key, 0)
-      end)
+#     hour_counts =
+#       Enum.map(0..23, fn hour ->
+#         key = {etype, hour}
+#         Map.get(counter_lookup, key, 0)
+#       end)
 
-    {etype, hour_counts}
-  end)
-  |> Enum.into(%{})
-  |> IO.inspect(charlists: :as_lists, limit: :infinity)
+#     {etype, hour_counts}
+#   end)
+#   |> Enum.into(%{})
+#   |> IO.inspect(charlists: :as_lists, limit: :infinity)
 ```
 
 ```elixir
-# Total number of events
-events |> Enum.flat_map(fn {_etype, counts} -> counts end) |> Enum.sum()
+# # Total number of events
+# events |> Enum.flat_map(fn {_etype, counts} -> counts end) |> Enum.sum
 ```
 
 ```elixir
-# Total size of all files in Jan 2015
-size_in_bytes =
-  "ls -l /Users/parth/temp/github_events/2015/"
-  |> to_charlist()
-  |> :os.cmd()
-  |> to_string()
-  |> String.split("\n")
-  |> Enum.reject(fn line -> String.starts_with?(line, "total") end)
-  |> Enum.map(fn line -> String.split(line, ~r/\s+/) end)
-  |> Enum.map(fn row -> Enum.at(row, 4) end)
-  |> Enum.reject(&is_nil(&1))
-  |> Enum.map(&String.to_integer(&1))
-  |> Enum.sum()
+# # Total size of all files in Jan 2015
+# size_in_bytes =
+#   "ls -l /Users/parth/temp/github_events/2015/"
+#   |> to_charlist()
+#   |> :os.cmd()
+#   |> to_string()
+#   |> String.split("\n")
+#   |> Enum.reject(fn line -> String.starts_with?(line, "total") end)
+#   |> Enum.map(fn line -> String.split(line, ~r/\s+/) end)
+#   |> Enum.map(fn row -> Enum.at(row, 4) end)
+#   |> Enum.reject(&(is_nil &1))
+#   |> Enum.map(&(String.to_integer &1))
+#   |> Enum.sum()
 
-size_in_gb = (size_in_bytes / :math.pow(10, 9)) |> Float.round(2)
+# size_in_gb = (size_in_bytes/:math.pow(10, 9)) |> Float.round(2)
 
-"#{size_in_gb} GB"
+# "#{size_in_gb} GB"  
 ```
 
 ```elixir
-event_types =
-  events
-  |> Enum.map(fn {event_type, _} -> event_type end)
+# event_types =
+#   events
+#   |> Enum.map(fn {event_type, _} -> event_type end)
 
-categories = 0..23 |> Enum.to_list()
-# stack_data = sorted_events |> Enum.into(%{})
+# categories = (0..23) |> Enum.to_list
+# # stack_data = sorted_events |> Enum.into(%{})
 
-stacked_bar_options = %{
-  title: "My Stacked Bar Chart",
-  legend: event_types,
-  categories: categories,
-  # Change to "vertical" for vertical orientation
-  orientation: "horizontal",
-  stacked_data: events
-}
+# stacked_bar_options = %{
+#   title: "My Stacked Bar Chart",
+#   legend: event_types,
+#   categories: categories,
+#   # Change to "vertical" for vertical orientation
+#   orientation: "horizontal",
+#   stacked_data: events
+# }
 
-LbEcharts.stacked_bar(stacked_bar_options)
+# LbEcharts.stacked_bar(stacked_bar_options)
 ```
 
 ## Parsing using regex instead of JSON parsing
@@ -267,11 +269,11 @@ LbEcharts.stacked_bar(stacked_bar_options)
 
 # parent = self()
 
-# # streams =
-# #   for file <- File.ls!("/Users/parth/temp/github_events/2023-03-07-0.json.gz") do
-# #     full_path = "/Users/parth/temp/github_events/#{file}"
-# #     File.stream!(full_path, [:compressed, {:read_ahead, 100_000}])
-# #   end
+# streams =
+#   for file <- File.ls!("/Users/parth/temp/github_events/2023-03-07-0.json.gz") do
+#     full_path = "/Users/parth/temp/github_events/#{file}"
+#     File.stream!(full_path, [:compressed, {:read_ahead, 100_000}])
+#   end
 
 # full_path = "/Users/parth/temp/github_events/2023-03-07-0.json.gz"
 # streams = [File.stream!(full_path, [:compressed, {:read_ahead, 100_000}])]
@@ -329,84 +331,154 @@ LbEcharts.stacked_bar(stacked_bar_options)
 ## Download Github events files
 
 ```elixir
-download_path = "/Volumes/BigFatDrive/Data/github_events"
-# base_link = "https://data.gharchive.org/2015-01-{01..31}-{0..23}.json.gz"
-base_link = "https://data.gharchive.org"
-start_date = ~D[2015-08-15]
-end_date = ~D[2015-12-31]
+# download_path = "/Volumes/BigFatDrive/Data/github_events"
+# # base_link = "https://data.gharchive.org/2015-01-{01..31}-{0..23}.json.gz"
+# base_link = "https://data.gharchive.org"
+# start_date = ~D[2015-08-15]
+# end_date = ~D[2015-12-31]
 
-# Execute from 8/15 onwards once the 0-9 hrs is done
-dates =
-  Date.range(start_date, end_date)
-  |> Enum.map(fn date ->
-    Date.to_string(date)
-  end)
-  |> IO.inspect(label: "Dates =>>> ")
+# # Execute from 8/15 onwards once the 0-9 hrs is done
+# dates =
+#   Date.range(start_date, end_date)
+#   |> Enum.map(fn date ->
+#     Date.to_string(date)
+#   end)
+#   |> IO.inspect(label: "Dates =>>> ")
 
-hours =
-  Enum.map(10..23, fn i ->
-    Integer.to_string(i, 10)
-  end)
+# hours =
+#   Enum.map(10..23, fn i ->
+#     Integer.to_string(i, 10)
+#   end)
 
-exec_cmd = fn cmd ->
-  cmd
-  |> to_charlist()
-  |> :os.cmd()
-  |> to_string()
-end
+# exec_cmd = fn cmd ->
+#   cmd
+#   |> to_charlist()
+#   |> :os.cmd()
+#   |> to_string()
+# end
 
-files =
-  for date <- dates,
-      hour <- hours do
-    datetime = "#{date}-#{hour}"
-    file_name = "#{datetime}.json.gz"
-    file_path = "#{base_link}/#{file_name}"
-  end
+# files =
+#   for date <- dates,
+#       hour <- hours do
+#     datetime = "#{date}-#{hour}"
+#     file_name = "#{datetime}.json.gz"
+#     file_path = "#{base_link}/#{file_name}"
+#   end
 
-download_files = fn ->
-  files
-  |> Task.async_stream(
-    fn file_path ->
-      file_name = file_path |> String.split("/") |> Enum.reverse() |> hd()
-      destination_path = "#{download_path}/#{file_name}"
-      cmd = "curl #{file_path} > #{destination_path}"
-      IO.puts("Executing '#{cmd}'")
+# download_files = fn ->
+#   files
+#   |> Task.async_stream(
+#     fn file_path ->
+#       file_name = file_path |> String.split("/") |> Enum.reverse() |> hd()
+#       destination_path = "#{download_path}/#{file_name}"
+#       cmd = "curl #{file_path} > #{destination_path}"
+#       IO.puts("Executing '#{cmd}'")
 
-      exec_cmd.(cmd)
-      |> IO.inspect()
+#       exec_cmd.(cmd)
+#       |> IO.inspect()
 
-      current_datetime = DateTime.utc_now() |> to_string
-      IO.puts("#{current_datetime} : Finished downloading #{file_name}")
-    end,
-    max_concurrency: 10,
-    timeout: 20_000,
-    on_timeout: :kill_task
-  )
-  |> Enum.to_list()
-end
+#       current_datetime = DateTime.utc_now() |> to_string
+#       IO.puts("#{current_datetime} : Finished downloading #{file_name}")
+#     end,
+#     max_concurrency: 10,
+#     timeout: 20_000,
+#     on_timeout: :kill_task
+#   )
+#   |> Enum.to_list()
+# end
 ```
 
 ## Find the files that are corrupt and delete them
 
 ```elixir
-# Find the files of length 127 bytes
-cmd = "ls -l #{download_path}"
+# # Find the files of length 127 bytes
+# cmd = "ls -l #{download_path}"
 
-exec_cmd.(cmd)
-|> String.split("\n")
-|> Enum.reject(&String.starts_with?(&1, "total"))
-|> Enum.map(fn line ->
-  items = String.split(line, ~r/\s+/)
-  file_size = Enum.at(items, 4)
-  file = Enum.at(items, 8)
-  full_file_path = "#{download_path}/#{file}"
-  {full_file_path, file_size}
-end)
-|> Enum.filter(fn {file_path, size} -> size == "127" end)
-|> Enum.each(fn {file_path, _} ->
-  IO.puts("Deleting #{file_path} ...")
+# exec_cmd.(cmd)
+# |> String.split("\n")
+# |> Enum.reject(&String.starts_with?(&1, "total"))
+# |> Enum.map(fn line ->
+#   items = String.split(line, ~r/\s+/)
+#   file_size = Enum.at(items, 4)
+#   file = Enum.at(items, 8)
+#   full_file_path = "#{download_path}/#{file}"
+#   {full_file_path, file_size}
+# end)
+# |> Enum.filter(fn {file_path, size} -> size == "127" end)
+# |> Enum.each(fn {file_path, _} ->
+#   IO.puts("Deleting #{file_path} ...")
 
-  exec_cmd.("rm #{file_path}")
-  |> IO.inspect()
-end)
+#   exec_cmd.("rm #{file_path}")
+#   |> IO.inspect()
+# end)
+```
+
+## Process Github events TSV file (300m rows)
+
+#### Process the whole file without splitting
+
+```elixir
+# "/Users/parth/temp/github_events/clickhouse_tsv/github_events_v2.tsv"
+# |> File.stream!([{:read_ahead, 100_000}])
+# |> Stream.take(100_000_000)
+# |> Flow.from_enumerable()
+# |> Flow.map(fn line ->
+#   line |> String.split("\t") |> Enum.at(1)
+# end)
+# |> Flow.partition()
+# |> Flow.reduce(fn -> %{} end, fn event_type, acc ->
+#   Map.update(acc, event_type, 1, &(&1 + 1))
+# end)
+# |> Enum.to_list()
+```
+
+#### Parse the files after splitting
+
+```elixir
+# # Count the number of lines in the file
+# count_lines = fn ->
+#   tab_char = :binary.compile_pattern("\t") # BINARY
+
+#   streams =
+#     for file <- File.ls!("/Users/parth/temp/github_events/clickhouse_tsv") do
+#       full_path = "/Users/parth/temp/github_events/clickhouse_tsv/#{file}"
+#       File.stream!(full_path, [{:read_ahead, 100_000}])
+#     end
+
+#   streams
+#   # |> Enum.take(4)
+#   |> Flow.from_enumerables()
+#   |> Flow.map(fn line ->
+#     line |> String.split(tab_char) |> Enum.at(1)
+#   end)
+#   |> Flow.partition()
+#   |> Flow.reduce(fn -> %{} end, fn event_type, acc ->
+#     Map.update(acc, event_type, 1, &(&1 + 1))
+#   end)
+#   |> Enum.to_list()
+# end
+
+# count_lines.()
+```
+
+#### Observations from above
+
+* Using flow library we are able to parse 300m events in 600s which is around 500k/s on a Macbook M1 Pro 10 core
+* The job seems to be IO bound, I am seeing only 400-500% CPU usage accross 10 cores
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Optimize using explorer
+
+```elixir
+alias Explorer.DataFrame, as: DF
+
+file_name = "/Users/parth/temp/github_events/clickhouse_tsv/github_events_ab"
+df = DF.from_csv!(file_name, delimiter: "\t", header: false)
+```
+
+```elixir
+alias Explorer.Series
+
+DF.frequencies(df, ["column_13"])
 ```
